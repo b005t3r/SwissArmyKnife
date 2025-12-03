@@ -5,6 +5,12 @@ import PackageDescription
 
 let package = Package(
     name: "SwissArmyKnife",
+    platforms: [
+        .macOS(.v13),
+        .iOS(.v15),
+        .macCatalyst(.v15),
+        .tvOS(.v14)
+    ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
@@ -16,6 +22,5 @@ let package = Package(
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "SwissArmyKnife"),
-
     ]
 )
