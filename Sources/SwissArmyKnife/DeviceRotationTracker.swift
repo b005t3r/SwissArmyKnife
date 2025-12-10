@@ -41,11 +41,122 @@ public extension CMAttitude {
     }
 }
 
-public class DeviceRotationTracker {
-    private var motionManager:CMMotionManager? = nil
+public class VideoData: Codable {
+    public static func loadFromJSON(url: URL) -> VideoData {
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+                positiveInfinity: "inf",
+                negativeInfinity: "-inf",
+                nan: "nan"
+            )
+            return try decoder.decode(VideoData.self, from: data)
+        } catch {
+            fatalError("VideoData.loadFromJSON failed for \(url): \(error)")
+        }
+    }
+
+    public func saveAsJSON(url: URL) {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.nonConformingFloatEncodingStrategy = .convertToString(
+                positiveInfinity: "inf",
+                negativeInfinity: "-inf",
+                nan: "nan"
+            )
+            let data = try encoder.encode(self)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            fatalError("VideoData.saveAsJSON failed for \(url): \(error)")
+        }
+    }
     
-    private var reference:GyroData? = nil
-    public private(set) var gyroData:[GyroData] = []
+    public let videoTimestamps: [CMTime]
+    public let gyro: [simd_quatf]
+    public let gyroTimestamps: [TimeInterval]
+    public let horizontalFOV: Float
+    public let verticalFOV: Float
+    public let shutterSpeed: Float
+
+    public init(videoTimestamps: [CMTime],
+         gyro: [simd_quatf],
+         gyroTimestamps: [TimeInterval],
+         horizontalFOV: Float,
+         verticalFOV: Float,
+         shutterSpeed: Float) {
+        
+        self.videoTimestamps = videoTimestamps
+        self.gyro = gyro
+        self.gyroTimestamps = gyroTimestamps
+        self.horizontalFOV = horizontalFOV
+        self.verticalFOV = verticalFOV
+        self.shutterSpeed = shutterSpeed
+    }
+
+    // MARK: - Codable
+
+    enum CodingKeys: String, CodingKey {
+        case videoTimestamps
+        case gyro
+        case gyroTimestamps
+        case horizontalFOV
+        case verticalFOV
+        case shutterSpeed
+    }
+
+    required public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // CMTime -> [Double seconds]
+        let timestampSeconds = try container.decode([Double].self, forKey: .videoTimestamps)
+        self.videoTimestamps = timestampSeconds.map {
+            CMTime(seconds: $0, preferredTimescale: 600)
+        }
+
+        // simd_quatf -> [[Float]] as [x, y, z, w]
+        let gyroComponents = try container.decode([[Float]].self, forKey: .gyro)
+        self.gyro = gyroComponents.map { comps in
+            precondition(comps.count == 4, "Invalid gyro quaternion component count")
+            return simd_quatf(ix: comps[0], iy: comps[1], iz: comps[2], r: comps[3])
+        }
+
+        self.gyroTimestamps = try container.decode([TimeInterval].self, forKey: .gyroTimestamps)
+        self.horizontalFOV = try container.decode(Float.self, forKey: .horizontalFOV)
+        self.verticalFOV = try container.decode(Float.self, forKey: .verticalFOV)
+        self.shutterSpeed = try container.decode(Float.self, forKey: .shutterSpeed)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        // CMTime -> seconds
+        try container.encode(videoTimestamps.map { $0.seconds }, forKey: .videoTimestamps)
+
+        // simd_quatf -> [x, y, z, w]
+        let gyroComponents: [[Float]] = gyro.map { q in
+            let imag = q.imag
+            return [imag.x, imag.y, imag.z, q.real]
+        }
+        try container.encode(gyroComponents, forKey: .gyro)
+
+        try container.encode(gyroTimestamps, forKey: .gyroTimestamps)
+        try container.encode(horizontalFOV, forKey: .horizontalFOV)
+        try container.encode(verticalFOV, forKey: .verticalFOV)
+        try container.encode(shutterSpeed, forKey: .shutterSpeed)
+    }
+}
+
+public class DeviceRotationTracker {
+    #if os(iOS)
+    private var motionManager:CMMotionManager? = nil
+    #elseif os(macOS)
+    private var data:VideoData? = nil
+    #endif
+    
+    private var reference:simd_quatf = .init(real: 1.0, imag: .zero)
+    private var gyroData:[GyroData] = []
     
     private var gyroDataQueue = DispatchQueue(label: "device-rotation-tracker-queue")
     
@@ -53,9 +164,12 @@ public class DeviceRotationTracker {
     }
     
     deinit {
+        #if os(iOS)
         stopTracking()
+        #endif
     }
     
+#if os(iOS)
     public func startTracking(updateInterval:TimeInterval = 1.0 / 120.0, gyroDataMaxCount:Int = 1000) {
         guard motionManager == nil else { return }
         
@@ -86,6 +200,11 @@ public class DeviceRotationTracker {
         motionManager?.stopDeviceMotionUpdates()
         motionManager = nil
     }
+#endif
+
+    public func loadTrackingData(data:VideoData) {
+        self.data = data
+    }
     
     public func clearCachedData() {
         self.gyroDataQueue.async {
@@ -103,7 +222,7 @@ public class DeviceRotationTracker {
     
     public func setReferenceTime(timestamp:CMTime) {
         if !timestamp.isValid {
-            reference = nil
+            reference = .init(real: 1.0, imag: .zero)
             
             return
         }
@@ -111,20 +230,27 @@ public class DeviceRotationTracker {
         reference = findClosestFrame(timestamp: timestamp)
     }
     
-    public func getRelativeRotation(timestamp:CMTime) -> GyroData? {
-        guard let reference = reference else { return nil }
-        guard let currentData = findClosestFrame(timestamp: timestamp) else { return nil }
+    public func getRelativeRotation(timestamp:CMTime) -> simd_quatf {
+        let reference = reference
+        let current = findClosestFrame(timestamp: timestamp)
         
-        return currentData.relativeTo(reference)
+        return reference.inverse * current
     }
     
-    private func findClosestFrame(timestamp:CMTime) -> GyroData? {
+    private func findClosestFrame(timestamp:CMTime) -> simd_quatf {
         return findClosestFrame(seconds: timestamp.seconds)
     }
     
-    private func findClosestFrame(seconds:TimeInterval) -> GyroData? {
+    private func findClosestFrame(seconds:TimeInterval) -> simd_quatf {
         gyroDataQueue.sync {
-            return !self.gyroData.isEmpty ? self.gyroData.min { left, right in abs(left.timestamp - seconds) < abs(right.timestamp - seconds) } : nil
+            #if os(iOS)
+            return !self.gyroData.isEmpty
+                ? self.gyroData.min { left, right in abs(left.timestamp - seconds) < abs(right.timestamp - seconds) }?.simfQuaternion ?? .init(real: 1.0, imag: .zero)
+                : .init(real: 1.0, imag: .zero)
+            #else
+            let closestIndex = self.data?.gyroTimestamps.enumerated().min { left, right in abs(left.element - seconds) < abs(right.element - seconds) }?.offset ?? -1
+            return data?.gyro[closestIndex] ?? .init(real: 1.0, imag: .zero)
+            #endif
         }
     }
 }
