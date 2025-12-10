@@ -7,6 +7,7 @@
 
 import AVFoundation
 
+#if os(iOS)
 public final class CameraControl {
     public private(set) var fixedShutter: CMTime = .invalid
 
@@ -100,3 +101,4 @@ public final class CameraControl {
         }
     }
 }
+#endif
