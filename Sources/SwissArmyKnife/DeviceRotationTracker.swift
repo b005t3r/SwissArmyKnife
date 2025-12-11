@@ -244,12 +244,50 @@ public class DeviceRotationTracker {
     private func findClosestFrame(seconds:TimeInterval) -> simd_quatf {
         gyroDataQueue.sync {
             #if os(iOS)
+            guard !self.gyroData.isEmpty else { return .init(real: 1.0, imag: .zero) }
+            
+            if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
+                let prevIndex = max(0, nextIndex - 1)
+
+                let prevTimestamp = self.gyroData[prevIndex].timestamp
+                let nextTimestamp = self.gyroData[nextIndex].timestamp
+                let delta = nextTimestamp - prevTimestamp
+                let alpha = delta > 0 ? seconds - prevTimestamp : 0
+                
+                let prev = self.gyroData[prevIndex].simfQuaternion
+                let next = self.gyroData[prevIndex].simfQuaternion
+                
+                return simd_slerp(prev, next, Float(alpha / delta))
+            }
+            else {
+                return .init(real: 1.0, imag: .zero)
+            }
+
             return !self.gyroData.isEmpty
                 ? self.gyroData.min { left, right in abs(left.timestamp - seconds) < abs(right.timestamp - seconds) }?.simfQuaternion ?? .init(real: 1.0, imag: .zero)
                 : .init(real: 1.0, imag: .zero)
             #else
-            let closestIndex = self.data?.gyroTimestamps.enumerated().min { left, right in abs(left.element - seconds) < abs(right.element - seconds) }?.offset ?? -1
-            return data?.gyro[closestIndex] ?? .init(real: 1.0, imag: .zero)
+            guard let data = data else { return .init(real: 1.0, imag: .zero) }
+            
+            if let nextIndex = data.gyroTimestamps.firstIndex { t in t >= seconds } {
+                let prevIndex = max(0, nextIndex - 1)
+
+                let prevTimestamp = data.gyroTimestamps[prevIndex]
+                let nextTimestamp = data.gyroTimestamps[nextIndex]
+                let delta = nextTimestamp - prevTimestamp
+                let alpha = delta > 0 ? seconds - prevTimestamp : 0
+                
+                let prev = data.gyro[prevIndex]
+                let next = data.gyro[nextIndex]
+                
+                return simd_slerp(prev, next, Float(alpha / delta))
+            }
+            else {
+                return .init(real: 1.0, imag: .zero)
+            }
+            
+            //let closestIndex = self.data?.gyroTimestamps.enumerated().min { left, right in abs(left.element - seconds) < abs(right.element - seconds) }?.offset ?? -1
+            //return data?.gyro[closestIndex] ?? .init(real: 1.0, imag: .zero)
             #endif
         }
     }
