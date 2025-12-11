@@ -89,3 +89,11 @@ public extension Rect2D {
         return Self(origin: self.origin.fromImageToNormalized(imageSize: imageSize), size: self.size.fromImageToNormalized(imageSize: imageSize))
     }
 }
+
+public extension Rect2D {
+    func resizedAroundCenter(by scale: Scalar) -> Self {
+        return Self(
+            origin: Point(x: self.origin.x - self.size.width * 0.5, y: self.origin.y - self.size.height * 0.5),
+            size: self.size * 2.0)
+    }
+}
