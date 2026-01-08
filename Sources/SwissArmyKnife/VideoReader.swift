@@ -18,6 +18,33 @@ import AVFoundation
 import Foundation
 import AVFoundation
 
+#if os(iOS)
+
+@available(iOS, introduced: 11.0, obsoleted: 16.0)
+extension CMTime: Hashable {
+    public var hashValue: Int {
+        get {
+            var hasher = Hasher()
+            
+            hasher.combine(value)
+            hasher.combine(timescale)
+            hasher.combine(flags.rawValue)
+            hasher.combine(epoch)
+
+            return hasher.finalize()
+        }
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(value)
+        hasher.combine(timescale)
+        hasher.combine(flags.rawValue)
+        hasher.combine(epoch)
+    }
+}
+
+#endif
+
 public final class VideoReader {
     public let asset: AVAsset
     public let duration: CMTime
