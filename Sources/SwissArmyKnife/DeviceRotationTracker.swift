@@ -186,7 +186,7 @@ public class DeviceRotationTracker {
                 attitude: motion.attitude.copy() as! CMAttitude,
                 timestamp: motion.timestamp)
             
-            self.gyroDataQueue.async(flags: .barrier) {
+            self.gyroDataQueue.sync {
                 self.gyroData.append(data)
                 
                 if self.gyroData.count > gyroDataMaxCount {
@@ -202,12 +202,14 @@ public class DeviceRotationTracker {
     }
 #endif
 
+#if os(macOS)
     public func loadTrackingData(data:VideoData) {
         self.data = data
     }
+#endif
     
     public func clearCachedData() {
-        self.gyroDataQueue.async {
+        self.gyroDataQueue.sync {
             self.gyroData.removeAll()
         }
     }
@@ -257,7 +259,7 @@ public class DeviceRotationTracker {
                 let prev = self.gyroData[prevIndex].simfQuaternion
                 let next = self.gyroData[prevIndex].simfQuaternion
                 
-                return simd_slerp(prev, next, Float(alpha / delta))
+                return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
             }
             else {
                 return .init(real: 1.0, imag: .zero)
