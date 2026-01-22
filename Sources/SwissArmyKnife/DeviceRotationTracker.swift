@@ -74,6 +74,7 @@ public class VideoData: Codable {
     }
     
     public let videoTimestamps: [CMTime]
+    public let skippedTimestamps:[CMTime]
     public let gyro: [simd_quatf]
     public let gyroTimestamps: [TimeInterval]
     public let horizontalFOV: Float
@@ -81,6 +82,7 @@ public class VideoData: Codable {
     public let shutterSpeed: Float
 
     public init(videoTimestamps: [CMTime],
+                skippedTimestamps:[CMTime] = [],
          gyro: [simd_quatf],
          gyroTimestamps: [TimeInterval],
          horizontalFOV: Float,
@@ -88,6 +90,7 @@ public class VideoData: Codable {
          shutterSpeed: Float) {
         
         self.videoTimestamps = videoTimestamps
+        self.skippedTimestamps = skippedTimestamps
         self.gyro = gyro
         self.gyroTimestamps = gyroTimestamps
         self.horizontalFOV = horizontalFOV
@@ -99,6 +102,7 @@ public class VideoData: Codable {
 
     enum CodingKeys: String, CodingKey {
         case videoTimestamps
+        case skippedTimestamps
         case gyro
         case gyroTimestamps
         case horizontalFOV
@@ -112,6 +116,12 @@ public class VideoData: Codable {
         // CMTime -> [Double seconds]
         let timestampSeconds = try container.decode([Double].self, forKey: .videoTimestamps)
         self.videoTimestamps = timestampSeconds.map {
+            CMTime(seconds: $0, preferredTimescale: 600)
+        }
+
+        // NEW: skippedTimestamps is optional for backwards compatibility
+        let skippedSeconds = try container.decodeIfPresent([Double].self, forKey: .skippedTimestamps) ?? []
+        self.skippedTimestamps = skippedSeconds.map {
             CMTime(seconds: $0, preferredTimescale: 600)
         }
 
@@ -133,6 +143,9 @@ public class VideoData: Codable {
 
         // CMTime -> seconds
         try container.encode(videoTimestamps.map { $0.seconds }, forKey: .videoTimestamps)
+
+        // NEW: skippedTimestamps -> seconds
+        try container.encode(skippedTimestamps.map { $0.seconds }, forKey: .skippedTimestamps)
 
         // simd_quatf -> [x, y, z, w]
         let gyroComponents: [[Float]] = gyro.map { q in
@@ -185,6 +198,10 @@ public class DeviceRotationTracker {
             let data = GyroData(
                 attitude: motion.attitude.copy() as! CMAttitude,
                 timestamp: motion.timestamp)
+            
+//            let now = CMClockGetTime(CMClockGetHostTimeClock())
+//
+//            print("delay: \((now.seconds - motion.timestamp) * 1000)ms")
             
             self.gyroDataQueue.sync {
                 self.gyroData.append(data)
@@ -239,6 +256,10 @@ public class DeviceRotationTracker {
         return reference.inverse * current
     }
     
+    public func getAbsoluteRotation(timestamp:CMTime) -> simd_quatf {
+        return findClosestFrame(timestamp: timestamp)
+    }
+    
     private func findClosestFrame(timestamp:CMTime) -> simd_quatf {
         return findClosestFrame(seconds: timestamp.seconds)
     }
@@ -282,7 +303,7 @@ public class DeviceRotationTracker {
                 let prev = data.gyro[prevIndex]
                 let next = data.gyro[nextIndex]
                 
-                return simd_slerp(prev, next, Float(alpha / delta))
+                return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
             }
             else {
                 return .init(real: 1.0, imag: .zero)
