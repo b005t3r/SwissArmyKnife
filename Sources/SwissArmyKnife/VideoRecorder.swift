@@ -9,6 +9,16 @@ import Foundation
 import AVFoundation
 
 public class VideoRecorder {
+    public struct FrameData {
+        public let timestamp:CMTime
+        public let encoded:Bool
+        
+        public init(timestamp: CMTime, encoded: Bool) {
+            self.timestamp = timestamp
+            self.encoded = encoded
+        }
+    }
+    
     let assetWriter: AVAssetWriter
     let assetWriterVideoInput: AVAssetWriterInput
     var assetWriterAudioInput: AVAssetWriterInput?
@@ -22,6 +32,13 @@ public class VideoRecorder {
     private var previousFrameTime = CMTime.negativeInfinity
     private var previousAudioTime = CMTime.negativeInfinity
     private var encodingLiveVideo: Bool
+    
+    private let frameDataQueue = DispatchQueue(label: "VideoRecorder.frameDataQueue")
+
+    private var _frameData = [FrameData]()
+    public var frameData: [FrameData] {
+        frameDataQueue.sync { _frameData }
+    }
     
     var transform: CGAffineTransform {
         get {
@@ -80,12 +97,18 @@ public class VideoRecorder {
     }
     
     public func startRecording(transform: CGAffineTransform? = nil) {
-        if let transform = transform {
+        if let transform {
             assetWriterVideoInput.transform = transform
         }
-        
+
         startTime = nil
-        self.isRecording = self.assetWriter.startWriting()
+        previousFrameTime = CMTime.negativeInfinity
+        previousAudioTime = CMTime.negativeInfinity
+        frameDataQueue.sync {
+            self._frameData.removeAll()
+        }
+
+        isRecording = assetWriter.startWriting()
     }
     
     public func finishRecording(_ completionCallback: (() -> Void)? = nil) {
@@ -116,40 +139,53 @@ public class VideoRecorder {
         }
     }
     
-    public func processPixelBuffer(pixelBuffer: CVPixelBuffer, frameTime:CMTime, queue:DispatchQueue? = nil, stopwatch:Stopwatch? = nil) {
-        guard isRecording else { return }
-        
-        // If two consecutive times with the same value are added to the movie, it aborts recording, so I bail on that case
-        guard frameTime != previousFrameTime else { return }
-        
-        if startTime == nil {
-            if assetWriter.status != .writing {
-                assetWriter.startWriting()
-            }
-            
-            assetWriter.startSession(atSourceTime: frameTime)
-            startTime = frameTime
+    public func processPixelBuffer(pixelBuffer: CVPixelBuffer,
+                                   frameTime: CMTime,
+                                   queue: DispatchQueue? = nil,
+                                   stopwatch: Stopwatch? = nil)
+    {
+        guard isRecording else {
+            recordFrame(frameTime, encoded: false)
+            return
         }
-        
+
         let work = {
             stopwatch?.start()
+
             defer { stopwatch?.stop() }
 
-            guard self.assetWriterVideoInput.isReadyForMoreMediaData || (!self.encodingLiveVideo) else {
-                debugPrint("Had to drop a frame at time \(frameTime)")
+            // Only compare against last *encoded* frame
+            if frameTime == self.previousFrameTime {
+                self.recordFrame(frameTime, encoded: false)
                 return
             }
-            
-            CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-            
-            if !self.assetWriterPixelBufferInput.append(pixelBuffer, withPresentationTime: frameTime) {
-                print("Problem appending pixel buffer at time: \(frameTime)")
+
+            // For live sources, do not start session until ready
+            guard self.assetWriterVideoInput.isReadyForMoreMediaData || (!self.encodingLiveVideo) else {
+                self.recordFrame(frameTime, encoded: false)
+                return
             }
-            
-            CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly)
+
+            if self.assetWriter.status == .unknown {
+                _ = self.assetWriter.startWriting()
+            }
+
+            // Start session immediately before first append attempt
+            if self.startTime == nil {
+                self.assetWriter.startSession(atSourceTime: frameTime)
+                self.startTime = frameTime
+            }
+
+            let ok = self.assetWriterPixelBufferInput.append(pixelBuffer, withPresentationTime: frameTime)
+            if ok {
+                self.recordFrame(frameTime, encoded: true)
+                self.previousFrameTime = frameTime
+            } else {
+                self.recordFrame(frameTime, encoded: false)
+            }
         }
-        
-        if let queue = queue {
+
+        if let queue {
             queue.async(execute: work)
         } else {
             work()
@@ -177,6 +213,12 @@ public class VideoRecorder {
             queue.async(execute: work)
         } else {
             work()
+        }
+    }
+    
+    private func recordFrame(_ timestamp: CMTime, encoded: Bool) {
+        frameDataQueue.sync {
+            self._frameData.append(FrameData(timestamp: timestamp, encoded: encoded))
         }
     }
 }
