@@ -37,6 +37,7 @@ extension CMTime: Hashable {
 #endif
 
 public final class VideoReader {
+    public let url:URL
     public let asset: AVAsset
     public let duration: CMTime
     
@@ -68,6 +69,7 @@ public final class VideoReader {
     }
     
     public init(url: URL) {
+        self.url = url
         self.asset = AVAsset(url: url)
         self.duration = asset.duration
         self.videoTrack = asset.tracks(withMediaType: .video).first
