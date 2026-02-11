@@ -63,6 +63,28 @@ public class VideoRecorder {
             localSettings = [String: AnyObject]()
         }
         
+        func heuristicBitrate(size: CGSize, fps: Double) -> Int {
+            let size = min(size.width, size.height)
+
+            if size < 1080 {
+                return 10_000_000
+            }
+            
+            let is4K = size > 1080 * 1.5
+            let is60fps = fps > 30.0 * 1.5
+
+            switch (is4K, is60fps) {
+            case (false, false): return 15_000_000 // 1080p @ 30
+            case (false, true):  return 25_000_000 // 1080p @ 60
+            case (true, false):  return 40_000_000 // 4K @ 30
+            case (true, true):   return 65_000_000 // 4K @ 60
+            }
+        }
+
+        var compression = [String: Any]()
+        compression[AVVideoAverageBitRateKey] = heuristicBitrate(size: size, fps: 60.0) // target 60 fps, since we don't have the actual value here
+        
+        localSettings[AVVideoCompressionPropertiesKey] = compression as AnyObject
         localSettings[AVVideoWidthKey] =
         localSettings[AVVideoWidthKey] ?? NSNumber(value: size.width)
         localSettings[AVVideoHeightKey] =
