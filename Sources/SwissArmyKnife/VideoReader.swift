@@ -130,6 +130,10 @@ public final class VideoReader {
         return try copyVideoSample(at: pts)
     }
     
+    public func copyCurrentVideoSample() throws -> CMSampleBuffer? {
+        return try copyVideoSample(atFrameIndex: currentFrameIndex)
+    }
+    
     public func copyNextVideoSample() throws -> CMSampleBuffer? {
         try buildFrameIndexIfNeeded()
         guard !framePTS.isEmpty else { return nil }
@@ -370,5 +374,23 @@ public final class VideoReader {
         }
         
         return out
+    }
+}
+
+public extension VideoReader {
+    public func createDummyVideoData() -> VideoData {
+        try? buildFrameIndexIfNeeded()
+
+        let landscapeInput = destinationResolution.width > destinationResolution.height
+        let quaterTurnCount = Int(round(abs(preferredImageRotation) / (.pi * 0.5)))
+        let landscapeOutput = (landscapeInput && (quaterTurnCount % 2 == 0)) || (!landscapeInput && (quaterTurnCount % 2 == 1))
+        
+        return VideoData(videoTimestamps: framePTS,
+                         skippedTimestamps: [],
+                         gyro: framePTS.map { _ in landscapeOutput ? simd_quatf(real: 1.0, imag: SIMD3<Float>(0.0, -1.0, 0.0)) : simd_quatf(real: 1.0, imag: SIMD3<Float>(-1.0, 0.0, 0.0)) },
+                         gyroTimestamps: framePTS.map { t in t.seconds },
+                         horizontalFOV: 1.22,
+                         verticalFOV: 0.93,
+                         shutterSpeed: 1.0 / 1000)
     }
 }
