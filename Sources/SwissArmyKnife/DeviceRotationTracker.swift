@@ -260,15 +260,41 @@ public class DeviceRotationTracker {
         return findClosestFrame(timestamp: timestamp)
     }
     
+    public func hasRotation(timestamp:CMTime) -> Bool {
+        return hasRotation(seconds: timestamp.seconds)
+    }
+    
+    public func hasRotation(seconds:TimeInterval) -> Bool {
+        #if os(iOS)
+        guard !self.gyroData.isEmpty else { return false }
+        
+        if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
+            return true
+        }
+        else {
+            return false
+        }
+        #else
+        guard let data = data else { return false }
+
+        if let nextIndex = data.gyroTimestamps.firstIndex { t in t >= seconds } {
+            return true
+        }
+        else {
+            return false
+        }
+        #endif
+    }
+    
     private func findClosestFrame(timestamp:CMTime) -> simd_quatf {
         return findClosestFrame(seconds: timestamp.seconds)
     }
     
     private func findClosestFrame(seconds:TimeInterval) -> simd_quatf {
         gyroDataQueue.sync {
+            guard hasRotation(seconds: seconds) else { return .init(real: 1.0, imag: .zero) }
+
             #if os(iOS)
-            guard !self.gyroData.isEmpty else { return .init(real: 1.0, imag: .zero) }
-            
             if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
                 let prevIndex = max(0, nextIndex - 1)
 
@@ -283,7 +309,7 @@ public class DeviceRotationTracker {
                 return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
             }
             else {
-                return .init(real: 1.0, imag: .zero)
+                fatalError("no gyroData, but hasRotation() returned true")
             }
 
             return !self.gyroData.isEmpty
@@ -306,7 +332,7 @@ public class DeviceRotationTracker {
                 return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
             }
             else {
-                return .init(real: 1.0, imag: .zero)
+                fatalError("no gyroData, but hasRotation() returned true")
             }
             
             //let closestIndex = self.data?.gyroTimestamps.enumerated().min { left, right in abs(left.element - seconds) < abs(right.element - seconds) }?.offset ?? -1
