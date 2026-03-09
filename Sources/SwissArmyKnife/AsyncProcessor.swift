@@ -8,8 +8,8 @@
 import Foundation
 
 public final class AsyncProcessor<T> {
-    private let dataQueue = DispatchQueue(label: "AsyncProcessor.dataQueue", qos: .userInitiated)
-    private let workQueue = DispatchQueue(label: "AsyncProcessor.workQueue", qos: .userInitiated)
+    private let dataQueue = SafeDispatchQueue(label: "AsyncProcessor.dataQueue", qos: .userInitiated)
+    private let workQueue = SafeDispatchQueue(label: "AsyncProcessor.workQueue", qos: .userInitiated)
 
     private let semaphore = DispatchSemaphore(value: 0)
 
