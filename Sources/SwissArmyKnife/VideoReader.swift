@@ -9,32 +9,9 @@ import Foundation
 import AVFoundation
 import CoreImage
 
-#if os(iOS)
-
-@available(iOS, introduced: 11.0, obsoleted: 16.0)
-extension CMTime: Hashable {
-    public var hashValue: Int {
-        get {
-            var hasher = Hasher()
-            
-            hasher.combine(value)
-            hasher.combine(timescale)
-            hasher.combine(flags.rawValue)
-            hasher.combine(epoch)
-
-            return hasher.finalize()
-        }
-    }
-    
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(value)
-        hasher.combine(timescale)
-        hasher.combine(flags.rawValue)
-        hasher.combine(epoch)
-    }
+public enum VideoReaderError: Error {
+    case noVideoTrack
 }
-
-#endif
 
 public final class VideoReader {
     public let url:URL
@@ -77,7 +54,13 @@ public final class VideoReader {
     public private(set) var currentFrameIndex = -1
     
     public var outputResolution: CGSize? = nil
-    public var skippedFrameCount: Int = 0 // USE THIS
+    public var skippedFrameCount: Int = 0 {
+        didSet {
+            guard skippedFrameCount != oldValue else { return }
+            
+            teardownCachedReader()
+        }
+    }
     private let ciContext = CIContext(options: [.cacheIntermediates: true])
     
     public var outputFps: Float {
@@ -92,27 +75,29 @@ public final class VideoReader {
         return framePTS.count
     }
     
-    public init(url: URL) {
+    // MARK: Continuous decoding (members)
+    private var cachedReader: AVAssetReader?
+    private var cachedOutput: AVAssetReaderTrackOutput?
+    private var cachedLastPTS: CMTime?
+    
+    public init(url: URL) throws {
         self.url = url
         self.asset = AVAsset(url: url)
         self.duration = asset.duration
         self.videoTrack = asset.tracks(withMediaType: .video).first
         
-        if let videoTrack {
-            self.sourceResolution = videoTrack.naturalSize   // ✅ raw track dimensions
-            
-            let t = videoTrack.preferredTransform
-            let angle = atan2(t.b, t.a)
-            let quarterTurn = CGFloat.pi / 2
-            preferredImageRotation = round(angle / quarterTurn) * quarterTurn
-            
-            fps = videoTrack.nominalFrameRate > 0 ? videoTrack.nominalFrameRate : .nan
+        guard let videoTrack else {
+            throw VideoReaderError.noVideoTrack
         }
-        else {
-            self.sourceResolution = .invalid
-            preferredImageRotation = .nan
-            fps = .nan
-        }
+        
+        self.sourceResolution = videoTrack.naturalSize   // ✅ raw track dimensions
+        
+        let t = videoTrack.preferredTransform
+        let angle = atan2(t.b, t.a)
+        let quarterTurn = CGFloat.pi / 2
+        preferredImageRotation = round(angle / quarterTurn) * quarterTurn
+        
+        fps = videoTrack.nominalFrameRate > 0 ? videoTrack.nominalFrameRate : .nan
     }
     
     public func copyVideoSample(atFrameIndex index: Int) throws -> CMSampleBuffer? {
@@ -195,6 +180,8 @@ public final class VideoReader {
         guard framePTS.isEmpty else { return }
         guard let videoTrack else { return }   // no video – nothing to do
         
+        teardownCachedReader()
+        
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(
             track: videoTrack,
@@ -236,35 +223,59 @@ public final class VideoReader {
     
     private func copyVideoSample(at time: CMTime) throws -> CMSampleBuffer? {
         guard let videoTrack else { return nil }
-        
+
         let clampedTime = clamp(time, minValue: .zero, maxValue: duration)
         let remainingDuration = duration - clampedTime
-        
         guard remainingDuration > .zero else { return nil }
-        
-        let reader = try createVideoAssetReader(asset: self.asset, track: videoTrack)
-        reader.reader.timeRange = CMTimeRange(start: clampedTime, duration: remainingDuration)
-        
-        guard reader.reader.startReading() else {
-            throw reader.reader.error ?? NSError(
+
+        if shouldUseCachedReader(for: clampedTime),
+           let out = cachedOutput,
+           let reader = cachedReader,
+           reader.status == .reading {
+
+            guard let sample = out.copyNextSampleBuffer() else {
+                teardownCachedReader()
+                return nil
+            }
+
+            updateCachedLastPTS(from: sample, fallback: clampedTime)
+
+            if outputResolution != nil {
+                return try scaleSampleBufferIfNeeded(sample)
+            }
+
+            return sample
+        }
+
+        teardownCachedReader()
+
+        let created = try createVideoAssetReader(asset: asset, track: videoTrack)
+        created.reader.timeRange = CMTimeRange(start: clampedTime, duration: remainingDuration)
+
+        guard created.reader.startReading() else {
+            throw created.reader.error ?? NSError(
                 domain: "VideoReader",
                 code: -2,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to start reading"]
             )
         }
-        
-        let sample = reader.output.copyNextSampleBuffer()
-        reader.reader.cancelReading()
-        
-        guard let sample else { return nil }
-        
-        if let target = outputResolution {
+
+        guard let sample = created.output.copyNextSampleBuffer() else {
+            created.reader.cancelReading()
+            return nil
+        }
+
+        cachedReader = created.reader
+        cachedOutput = created.output
+        updateCachedLastPTS(from: sample, fallback: clampedTime)
+
+        if outputResolution != nil {
             return try scaleSampleBufferIfNeeded(sample)
         }
-        
+
         return sample
     }
-    
+
     private func scaleSampleBufferIfNeeded(_ sample: CMSampleBuffer) throws -> CMSampleBuffer {
         guard
             let srcPB = CMSampleBufferGetImageBuffer(sample)
@@ -392,5 +403,33 @@ public extension VideoReader {
                          horizontalFOV: 1.22,
                          verticalFOV: 0.93,
                          shutterSpeed: 1.0 / 1000)
+    }
+}
+
+// MARK: Continuous decoding (methods)
+
+private extension VideoReader {
+    func teardownCachedReader() {
+        cachedReader?.cancelReading()
+        cachedReader = nil
+        cachedOutput = nil
+        cachedLastPTS = nil
+    }
+
+    func updateCachedLastPTS(from sample: CMSampleBuffer, fallback: CMTime) {
+        let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+        cachedLastPTS = pts.isValid ? pts : fallback
+    }
+
+    func shouldUseCachedReader(for requestedPTS: CMTime) -> Bool {
+        guard
+            let last = cachedLastPTS,
+            let lastIndex = framePTS.firstIndex(of: last)
+        else { return false }
+
+        let nextIndex = lastIndex + 1
+        guard nextIndex < framePTS.count else { return false }
+
+        return framePTS[nextIndex] == requestedPTS
     }
 }
