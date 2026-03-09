@@ -42,35 +42,27 @@ public extension CMAttitude {
 }
 
 public class VideoData: Codable {
-    public static func loadFromJSON(url: URL) -> VideoData {
-        do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            decoder.nonConformingFloatDecodingStrategy = .convertFromString(
-                positiveInfinity: "inf",
-                negativeInfinity: "-inf",
-                nan: "nan"
-            )
-            return try decoder.decode(VideoData.self, from: data)
-        } catch {
-            fatalError("VideoData.loadFromJSON failed for \(url): \(error)")
-        }
+    public static func loadFromJSON(url: URL) throws -> VideoData {
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+            positiveInfinity: "inf",
+            negativeInfinity: "-inf",
+            nan: "nan"
+        )
+        return try decoder.decode(VideoData.self, from: data)
     }
 
-    public func saveAsJSON(url: URL) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.nonConformingFloatEncodingStrategy = .convertToString(
-                positiveInfinity: "inf",
-                negativeInfinity: "-inf",
-                nan: "nan"
-            )
-            let data = try encoder.encode(self)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            fatalError("VideoData.saveAsJSON failed for \(url): \(error)")
-        }
+    public func saveAsJSON(url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "inf",
+            negativeInfinity: "-inf",
+            nan: "nan"
+        )
+        let data = try encoder.encode(self)
+        try data.write(to: url, options: .atomic)
     }
     
     public let videoTimestamps: [CMTime]
@@ -162,16 +154,13 @@ public class VideoData: Codable {
 }
 
 public class DeviceRotationTracker {
-    #if os(iOS)
     private var motionManager:CMMotionManager? = nil
-    #elseif os(macOS)
     private var data:VideoData? = nil
-    #endif
     
     private var reference:simd_quatf = .init(real: 1.0, imag: .zero)
     private var gyroData:[GyroData] = []
     
-    private var gyroDataQueue = DispatchQueue(label: "device-rotation-tracker-queue")
+    private var gyroDataQueue = SafeDispatchQueue(label: "device-rotation-tracker-queue")
     
     public init() {
     }
@@ -184,7 +173,7 @@ public class DeviceRotationTracker {
     
 #if os(iOS)
     public func startTracking(updateInterval:TimeInterval = 1.0 / 120.0, gyroDataMaxCount:Int = 1000) {
-        guard motionManager == nil else { return }
+        guard data == nil, motionManager == nil else { return }
         
         motionManager = CMMotionManager()
         
@@ -219,11 +208,9 @@ public class DeviceRotationTracker {
     }
 #endif
 
-#if os(macOS)
     public func loadTrackingData(data:VideoData) {
         self.data = data
     }
-#endif
     
     public func clearCachedData() {
         self.gyroDataQueue.sync {
@@ -265,25 +252,26 @@ public class DeviceRotationTracker {
     }
     
     public func hasRotation(seconds:TimeInterval) -> Bool {
-        #if os(iOS)
-        guard !self.gyroData.isEmpty else { return false }
-        
-        if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
-            return true
+        if let data {
+            if let nextIndex = data.gyroTimestamps.firstIndex { t in t >= seconds } {
+                return true
+            }
+            else {
+                return false
+            }
         }
         else {
-            return false
+            return self.gyroDataQueue.sync {
+                guard !self.gyroData.isEmpty else { return false }
+                
+                if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
+                    return true
+                }
+                else {
+                    return false
+                }
+            }
         }
-        #else
-        guard let data = data else { return false }
-
-        if let nextIndex = data.gyroTimestamps.firstIndex { t in t >= seconds } {
-            return true
-        }
-        else {
-            return false
-        }
-        #endif
     }
     
     private func findClosestFrame(timestamp:CMTime) -> simd_quatf {
@@ -291,33 +279,9 @@ public class DeviceRotationTracker {
     }
     
     private func findClosestFrame(seconds:TimeInterval) -> simd_quatf {
-        gyroDataQueue.sync {
-            guard hasRotation(seconds: seconds) else { return .init(real: 1.0, imag: .zero) }
+        guard hasRotation(seconds: seconds) else { return .init(real: 1.0, imag: .zero) }
 
-            #if os(iOS)
-            if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
-                let prevIndex = max(0, nextIndex - 1)
-
-                let prevTimestamp = self.gyroData[prevIndex].timestamp
-                let nextTimestamp = self.gyroData[nextIndex].timestamp
-                let delta = nextTimestamp - prevTimestamp
-                let alpha = delta > 0 ? seconds - prevTimestamp : 0
-                
-                let prev = self.gyroData[prevIndex].simfQuaternion
-                let next = self.gyroData[prevIndex].simfQuaternion
-                
-                return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
-            }
-            else {
-                fatalError("no gyroData, but hasRotation() returned true")
-            }
-
-            return !self.gyroData.isEmpty
-                ? self.gyroData.min { left, right in abs(left.timestamp - seconds) < abs(right.timestamp - seconds) }?.simfQuaternion ?? .init(real: 1.0, imag: .zero)
-                : .init(real: 1.0, imag: .zero)
-            #else
-            guard let data = data else { return .init(real: 1.0, imag: .zero) }
-            
+        if let data {
             if let nextIndex = data.gyroTimestamps.firstIndex { t in t >= seconds } {
                 let prevIndex = max(0, nextIndex - 1)
 
@@ -334,10 +298,30 @@ public class DeviceRotationTracker {
             else {
                 fatalError("no gyroData, but hasRotation() returned true")
             }
-            
-            //let closestIndex = self.data?.gyroTimestamps.enumerated().min { left, right in abs(left.element - seconds) < abs(right.element - seconds) }?.offset ?? -1
-            //return data?.gyro[closestIndex] ?? .init(real: 1.0, imag: .zero)
-            #endif
+        }
+        else {
+            return gyroDataQueue.sync {
+                if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
+                    let prevIndex = max(0, nextIndex - 1)
+                    
+                    let prevTimestamp = self.gyroData[prevIndex].timestamp
+                    let nextTimestamp = self.gyroData[nextIndex].timestamp
+                    let delta = nextTimestamp - prevTimestamp
+                    let alpha = delta > 0 ? seconds - prevTimestamp : 0
+                    
+                    let prev = self.gyroData[prevIndex].simfQuaternion
+                    let next = self.gyroData[prevIndex].simfQuaternion
+                    
+                    return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
+                }
+                else {
+                    fatalError("no gyroData, but hasRotation() returned true")
+                }
+                
+                return !self.gyroData.isEmpty
+                    ? self.gyroData.min { left, right in abs(left.timestamp - seconds) < abs(right.timestamp - seconds) }?.simfQuaternion ?? .init(real: 1.0, imag: .zero)
+                    : .init(real: 1.0, imag: .zero)
+            }
         }
     }
 }
