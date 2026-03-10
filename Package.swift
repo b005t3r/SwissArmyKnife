@@ -17,6 +17,9 @@ let package = Package(
             name: "SwissArmyKnife",
             targets: ["SwissArmyKnife"]),
     ],
+    dependencies: [
+        .package(path: "../GPUImage3")
+    ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
