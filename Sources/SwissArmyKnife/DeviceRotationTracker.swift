@@ -154,7 +154,9 @@ public class VideoData: Codable {
 }
 
 public class DeviceRotationTracker {
+#if os(iOS)
     private var motionManager:CMMotionManager? = nil
+#endif
     private var data:VideoData? = nil
     
     private var reference:simd_quatf = .init(real: 1.0, imag: .zero)
