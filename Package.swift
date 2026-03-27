@@ -17,7 +17,10 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(name: "GPUImage", path: "../GPUImage3")
+        .package(
+            url: "https://github.com/Vatensa/GPUImage3.git",
+            exact: "1.0.0"
+        )
     ],
     targets: [
         .target(
