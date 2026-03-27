@@ -26,7 +26,7 @@ let package = Package(
         .target(
             name: "SwissArmyKnife",
             dependencies: [
-                .product(name: "GPUImage", package: "GPUImage")
+                .product(name: "GPUImage", package: "GPUImage3")
             ]
         ),
     ]
