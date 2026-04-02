@@ -8,8 +8,8 @@
 import Foundation
 
 public final class AsyncProcessor<T> {
-    private let dataQueue = SafeDispatchQueue(label: "AsyncProcessor.dataQueue", qos: .userInitiated)
-    private let workQueue = SafeDispatchQueue(label: "AsyncProcessor.workQueue", qos: .userInitiated)
+    private let dataQueue:SafeDispatchQueue
+    private let workQueue:SafeDispatchQueue
 
     private let semaphore = DispatchSemaphore(value: 0)
 
@@ -17,8 +17,17 @@ public final class AsyncProcessor<T> {
     private var data:[T] = []
     private var isRunning = false
 
-    public init(dataBufferSize:Int) {
+    public init(dataBufferSize:Int, qos: DispatchQoS = .userInitiated, tag:String? = nil) {
         self.dataBufferSize = dataBufferSize
+        
+        if let tag {
+            dataQueue = SafeDispatchQueue(label: "AsyncProcessor.dataQueue.\(tag)", qos: qos)
+            workQueue = SafeDispatchQueue(label: "AsyncProcessor.workQueue.\(tag)", qos: qos)
+        }
+        else {
+            dataQueue = SafeDispatchQueue(label: "AsyncProcessor.dataQueue", qos: qos)
+            workQueue = SafeDispatchQueue(label: "AsyncProcessor.workQueue", qos: qos)
+        }
     }
 
     public func startProcessing(_ worker: @escaping (_ data: T) -> Void) {
