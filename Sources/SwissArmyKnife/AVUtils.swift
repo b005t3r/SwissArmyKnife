@@ -15,7 +15,13 @@ public enum RemuxError: Error {
     case exportFailed(Error?)
 }
 
-public func mux(videoInputURL: URL, audioInputURL: URL, outputURL: URL, audioStartTime: CMTime = .zero, completion: @escaping (Result<URL, Error>) -> Void) {
+public func mux(
+    videoInputURL: URL,
+    audioInputURL: URL,
+    outputURL: URL,
+    audioStartTime: CMTime = .zero,
+    completion: @escaping (Result<URL, Error>) -> Void
+) {
     let audioAsset = AVURLAsset(url: audioInputURL)
     let videoAsset = AVURLAsset(url: videoInputURL)
 
@@ -36,12 +42,18 @@ public func mux(videoInputURL: URL, audioInputURL: URL, outputURL: URL, audioSta
 
     let composition = AVMutableComposition()
 
-    guard let compositionVideoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+    guard let compositionVideoTrack = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+    ) else {
         completion(.failure(RemuxError.noVideoTrack))
         return
     }
 
-    guard let compositionAudioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+    guard let compositionAudioTrack = composition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+    ) else {
         completion(.failure(RemuxError.noAudioTrack))
         return
     }
@@ -65,13 +77,20 @@ public func mux(videoInputURL: URL, audioInputURL: URL, outputURL: URL, audioSta
         try? FileManager.default.removeItem(at: outputURL)
     }
 
-    guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+    guard let exportSession = AVAssetExportSession(
+        asset: composition,
+        presetName: AVAssetExportPresetPassthrough
+    ) else {
         completion(.failure(RemuxError.cannotCreateExportSession))
         return
     }
 
     exportSession.outputURL = outputURL
     exportSession.outputFileType = .mov
+    exportSession.metadata = videoAsset.metadata
+    
+    print("input GPS: \(videoAsset.metadata)")
+    print("export GPS: \(exportSession.metadata)")
 
     exportSession.exportAsynchronously {
         switch exportSession.status {
