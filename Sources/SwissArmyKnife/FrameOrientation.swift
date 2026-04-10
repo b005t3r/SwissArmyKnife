@@ -28,7 +28,23 @@ public enum FrameOrientation {
                 return with(angle: 0)
 
             case .landscapeLeft:
-                return with(angle:  .pi)
+                return with(angle: .pi)
+        }
+    }
+    
+    public var imageOrientation:ImageOrientation {
+        switch self {
+        case .none:
+            return .landscapeRight
+            
+        case .counterClockwise:
+            return .portraitUpsideDown
+            
+        case .clockwise:
+            return .portrait
+
+        case .upsideDown:
+            return .landscapeLeft
         }
     }
     
