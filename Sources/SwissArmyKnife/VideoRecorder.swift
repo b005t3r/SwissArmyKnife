@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import CoreLocation
 
 public class VideoRecorder {
     public struct FrameData {
@@ -242,5 +243,25 @@ public class VideoRecorder {
         frameDataQueue.sync {
             self._frameData.append(FrameData(timestamp: timestamp, encoded: encoded))
         }
+    }
+}
+
+// MARK: Adding GPS location to video's metadata
+
+public extension VideoRecorder {
+    func iso6709String(_ location: CLLocation) -> String {
+        String(format: "%+08.4f%+09.4f/", location.coordinate.latitude, location.coordinate.longitude)
+    }
+
+    public func setLocationMetadata(_ location: CLLocation) {
+        let item = AVMutableMetadataItem()
+        item.keySpace = .quickTimeMetadata
+        item.key = AVMetadataKey.quickTimeMetadataKeyLocationISO6709 as NSString
+        item.value = iso6709String(location) as NSString
+        item.dataType = kCMMetadataBaseDataType_UTF8 as String
+
+        assetWriter.metadata = (assetWriter.metadata ?? []) + [item]
+        
+        print("location set to: \(item.value)")
     }
 }
