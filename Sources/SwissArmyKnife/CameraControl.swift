@@ -8,20 +8,54 @@
 import AVFoundation
 import GPUImage
 
+private func FourCharCodeToString(_ value: FourCharCode) -> String {
+    let bytes: [CChar] = [
+        CChar((value >> 24) & 0xff),
+        CChar((value >> 16) & 0xff),
+        CChar((value >> 8) & 0xff),
+        CChar(value & 0xff),
+        0
+    ]
+    return String(cString: bytes)
+}
+
+
 #if os(iOS)
 public enum CameraMode: String {
     case res1080p30fps = "FullHD@30"
     case res1080p60fps = "FullHD@60"
     case res4k30fps = "4K@30"
     case res4k60fps = "4K@60"
+
+    public var fps: Double {
+        switch self {
+        case .res1080p30fps, .res4k30fps:
+            30
+        case .res1080p60fps, .res4k60fps:
+            60
+        }
+    }
+
+    public var frameDuration: CMTime {
+        CMTime(seconds: 1.0 / fps, preferredTimescale: 100000)
+    }
+
+    public var resolution: CGSize {
+        switch self {
+        case .res1080p30fps, .res1080p60fps:
+            CGSize(width: 1920, height: 1080)
+        case .res4k30fps, .res4k60fps:
+            CGSize(width: 3840, height: 2160)
+        }
+    }
 }
 
 public final class CameraControl {
     public private(set) var fixedShutter: CMTime = .invalid
-
+    
     private let camera: Camera
     private var isoTimer: DispatchSourceTimer?
-
+    
     public let formats:[CameraMode : AVCaptureDevice.Format]
     
     public var mode:CameraMode {
@@ -36,7 +70,7 @@ public final class CameraControl {
         }
     }
     
-    public init(camera: Camera, mode:CameraMode) {
+    public init(camera: Camera, mode:CameraMode/*, prefferedPixelFormat:OSType? = nil*/) {
         self.camera = camera
         
         let device = camera.inputCamera!
@@ -45,54 +79,72 @@ public final class CameraControl {
         
         for format in camera.inputCamera!.formats {
             let desc = format.formatDescription
-            
-            let mediaSubType = CMFormatDescriptionGetMediaSubType(desc)
-            
-            if mediaSubType == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange || // x420, 10bit
-                mediaSubType == kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange || // x422, 10bit
-                mediaSubType == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange || // 420v, 8bit
-                !format.isVideoHDRSupported {
-                continue
-            }
-            
             let dimensions = CMVideoFormatDescriptionGetDimensions(desc)
-            let frameRates = format.videoSupportedFrameRateRanges
-            let maxRate = frameRates.map { $0.maxFrameRate }.max() ?? 0
+            let pixelFormat = CMFormatDescriptionGetMediaSubType(desc)
+            let maxFPS = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
             
+            let is1080p = dimensions.width == 1920 && dimensions.height == 1080
+            let is4k = dimensions.width == 3840 && dimensions.height == 2160
+            let is420f = pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            //let is420v = pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            let is30or60 = maxFPS == 30 || maxFPS == 60
+            let isHdrSupported = format.isVideoHDRSupported
+
+            print("-----")
+            print("dimensions:", dimensions.width, "x", dimensions.height)
+            print("pixel format:", FourCharCodeToString(pixelFormat))
+            print("max fps:", maxFPS)
+            print("fov:", format.videoFieldOfView)
+            print("max zoom:", format.videoMaxZoomFactor)
+            print("upscale threshold:", format.videoZoomFactorUpscaleThreshold)
+            print("hdr:", isHdrSupported)
+            print("photo dims high res:", format.highResolutionStillImageDimensions)
+            print("color spaces:", format.supportedColorSpaces.map(String.init(describing:)))
+            print("frame rate ranges:")
+            for range in format.videoSupportedFrameRateRanges {
+                print("  min fps:", range.minFrameRate,
+                      "max fps:", range.maxFrameRate,
+                      "min duration:", range.minFrameDuration,
+                      "max duration:", range.maxFrameDuration)
+            }
+
+            // hdr supported means just better quality, only one 60fps 1080p format doesn't support that
+            guard (is1080p || is4k) && is420f && is30or60 && isHdrSupported else { continue }
+
             if (dimensions.width != 1920 || dimensions.height != 1080)
                 && (dimensions.width != 3840 || dimensions.height != 2160) {
                 continue
             }
             
             if dimensions.width == 1920 || dimensions.height == 1080 {
-                formatMap[maxRate == 60 ? .res1080p60fps : .res1080p30fps] = format
+                formatMap[maxFPS == 60 ? .res1080p60fps : .res1080p30fps] = format
             }
             else {
-                formatMap[maxRate == 60 ? .res4k60fps : .res4k30fps] = format
+                formatMap[maxFPS == 60 ? .res4k60fps : .res4k30fps] = format
             }
         }
         
         self.formats = formatMap
         self.mode = mode
     }
-
+    
     public func setShutterWithAutoExposure(_ seconds: Double) {
         fixedShutter = CMTimeMakeWithSeconds(seconds, preferredTimescale: 1_000_000_000)
-
+        
         do {
             try camera.inputCamera!.lockForConfiguration()
             camera.inputCamera!.setExposureModeCustom(duration: fixedShutter,
-                                         iso: (camera.inputCamera!.activeFormat.maxISO + camera.inputCamera!.activeFormat.minISO) * 0.5,
-                                         completionHandler: nil)
+                                                      iso: (camera.inputCamera!.activeFormat.maxISO + camera.inputCamera!.activeFormat.minISO) * 0.5,
+                                                      completionHandler: nil)
             camera.inputCamera!.unlockForConfiguration()
         } catch { print("Failed initial exposure set: \(error)") }
-
+        
         startAutoISOAdjustment()
     }
-
+    
     public func resetToAutoExposure() {
         stopAutoISOAdjustment()
-
+        
         do {
             try camera.inputCamera!.lockForConfiguration()
             if camera.inputCamera!.isExposureModeSupported(.continuousAutoExposure) {
@@ -103,11 +155,11 @@ public final class CameraControl {
             print("Failed resetting exposure: \(error)")
         }
     }
-
+    
     private func startAutoISOAdjustment() {
         stopAutoISOAdjustment()
         guard fixedShutter != .invalid else { return }
-
+        
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: 0.03) // ~30 Hz
         timer.setEventHandler { [weak self] in
@@ -116,34 +168,34 @@ public final class CameraControl {
         timer.resume()
         isoTimer = timer
     }
-
+    
     private func stopAutoISOAdjustment() {
         isoTimer?.cancel()
         isoTimer = nil
     }
-
+    
     private func updateISO() {
         guard fixedShutter != .invalid else { return }
-
+        
         let offset = camera.inputCamera!.exposureTargetOffset   // EV difference
-
+        
         // Deadzone to prevent flicker
         if abs(offset) < 0.03 { return }
-
+        
         let oldISO = camera.inputCamera!.iso
-
+        
         // exposureTargetOffset is in EV units:
         // +1 EV = twice too bright → halve ISO
         // -1 EV = too dark → increase ISO
         let isoFactor = pow(2.0, -Float(offset))
-
+        
         var newISO = oldISO * isoFactor
-
+        
         // Clamp within allowed range
         let minISO = camera.inputCamera!.activeFormat.minISO
         let maxISO = camera.inputCamera!.activeFormat.maxISO
         newISO = min(max(newISO, minISO), maxISO)
-
+        
         //print(newISO)
         
         do {
@@ -165,16 +217,25 @@ public final class CameraControl {
             return
         }
         
-        let maxRate = format.videoSupportedFrameRateRanges.map { frameRate in frameRate.maxFrameRate }.max() ?? 0
-
-        camera.videoFrameDelay = maxRate > 0 ? Int(round(videoInputDelay.seconds * maxRate)) : 2
+        let targetFPS = newMode.fps
+        
+        guard let frameRate = format.videoSupportedFrameRateRanges.min(by: {
+            abs($0.maxFrameRate - targetFPS) < abs($1.maxFrameRate - targetFPS)
+        }) else {
+            debugPrint("no frame rate range for: \(newMode)")
+            return
+        }
+        
+        camera.videoFrameDelay = Int(round(videoInputDelay.seconds * frameRate.maxFrameRate))
         
         do {
-            try camera.inputCamera!.lockForConfiguration()
-            camera.inputCamera!.activeFormat = format
-            camera.inputCamera!.unlockForConfiguration()
-        }
-        catch {
+            let device = camera.inputCamera!
+            try device.lockForConfiguration()
+            device.activeFormat = format
+            device.activeVideoMaxFrameDuration = frameRate.minFrameDuration
+            device.activeVideoMinFrameDuration = frameRate.minFrameDuration
+            device.unlockForConfiguration()
+        } catch {
             debugPrint(error)
         }
     }

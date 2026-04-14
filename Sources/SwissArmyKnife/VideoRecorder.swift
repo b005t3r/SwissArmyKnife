@@ -52,7 +52,7 @@ public class VideoRecorder {
     private var previousAudioTime = CMTime.negativeInfinity
     private var encodingLiveVideo: Bool
     
-    private let frameDataQueue = SafeDispatchQueue(label: "VideoRecorder.frameDataQueue")
+    private let frameDataQueue = SafeDispatchQueue(label: "VideoRecorder.frameDataQueue", qos: .default)
 
     private var _frameData = [FrameData]()
     public var frameData: [FrameData] {
@@ -68,12 +68,12 @@ public class VideoRecorder {
         }
     }
     
-    public init(URL: Foundation.URL, size: CGSize, fileType: AVFileType = AVFileType.mov, liveVideo: Bool = false, enableAudio:Bool = false, settings: [String: AnyObject]? = nil
+    public init(URL: Foundation.URL, size: CGSize, fileType: AVFileType = AVFileType.mov, sourcePixelFormat:OSType? = nil, liveVideo: Bool = false, enableAudio:Bool = false, settings: [String: AnyObject]? = nil
     ) throws {
         self.size = size
         assetWriter = try AVAssetWriter(url: URL, fileType: fileType)
         // Set this to make sure that a functional movie is produced, even if the recording is cut off mid-stream. Only the last second should be lost in that case.
-        assetWriter.movieFragmentInterval = CMTimeMakeWithSeconds(1.0, preferredTimescale: 1000)
+        //assetWriter.movieFragmentInterval = CMTimeMakeWithSeconds(1.0, preferredTimescale: 1000)
         
         var localSettings: [String: AnyObject]
         if let settings = settings {
@@ -83,7 +83,7 @@ public class VideoRecorder {
         }
         
         var compression = [String: Any]()
-        compression[AVVideoAverageBitRateKey] = VideoRecorder.heuristicBitrate(size: size, fps: 60.0) // target 60 fps, since we don't have the actual value here
+        compression[AVVideoAverageBitRateKey] = VideoRecorder.heuristicBitrate(size: size, fps: 60.0) / 2 // target 60 fps, since we don't have the actual value here
         
         localSettings[AVVideoCompressionPropertiesKey] = compression as AnyObject
         localSettings[AVVideoWidthKey] =
@@ -98,13 +98,19 @@ public class VideoRecorder {
         assetWriterVideoInput.expectsMediaDataInRealTime = liveVideo
         encodingLiveVideo = liveVideo
         
-        let sourcePixelBufferAttributesDictionary: [String: AnyObject] = [
-            kCVPixelBufferPixelFormatTypeKey as String: NSNumber(
-                value: Int32(kCVPixelFormatType_32BGRA)),
-            kCVPixelBufferWidthKey as String: NSNumber(value: size.width),
-            kCVPixelBufferHeightKey as String: NSNumber(value: size.height),
-        ]
-        
+        let sourcePixelBufferAttributesDictionary: [String: AnyObject] = sourcePixelFormat != nil
+        ?   [
+                kCVPixelBufferPixelFormatTypeKey as String: NSNumber(value: sourcePixelFormat!),
+                kCVPixelBufferWidthKey as String: NSNumber(value: size.width),
+                kCVPixelBufferHeightKey as String: NSNumber(value: size.height),
+            ]
+        :
+            [
+                kCVPixelBufferPixelFormatTypeKey as String: NSNumber(value: kCVPixelFormatType_32BGRA),
+                kCVPixelBufferWidthKey as String: NSNumber(value: size.width),
+                kCVPixelBufferHeightKey as String: NSNumber(value: size.height),
+            ]
+            
         assetWriterPixelBufferInput = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: assetWriterVideoInput,
             sourcePixelBufferAttributes: sourcePixelBufferAttributesDictionary)
