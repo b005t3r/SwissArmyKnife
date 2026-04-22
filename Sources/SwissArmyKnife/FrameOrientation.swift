@@ -115,4 +115,10 @@ public enum FrameOrientation {
                 return .pi
         }
     }
+    
+    public func rotate(frameSize:CGSize) -> CGSize {
+        return self == .clockwise || self == .counterClockwise
+            ? CGSize(width: frameSize.height, height: frameSize.width)
+            : frameSize
+    }
 }
