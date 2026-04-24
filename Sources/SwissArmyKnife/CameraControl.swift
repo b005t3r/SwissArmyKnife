@@ -238,6 +238,9 @@ public final class CameraControl {
         } catch {
             debugPrint(error)
         }
+
+        // make sure audio is properly reconfigured
+        camera.audioEncodingTarget = camera.audioEncodingTarget
     }
 }
 #endif
