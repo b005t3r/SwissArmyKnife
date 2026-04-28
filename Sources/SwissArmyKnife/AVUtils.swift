@@ -89,8 +89,8 @@ public func mux(
     exportSession.outputFileType = .mov
     exportSession.metadata = videoAsset.metadata
     
-    print("input GPS: \(videoAsset.metadata)")
-    print("export GPS: \(exportSession.metadata)")
+    //print("input GPS: \(videoAsset.metadata)")
+    //print("export GPS: \(exportSession.metadata)")
 
     exportSession.exportAsynchronously {
         switch exportSession.status {
