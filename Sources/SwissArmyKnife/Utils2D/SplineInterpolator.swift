@@ -10,7 +10,6 @@ import CoreMedia
 import SwissArmyKnife
 
 private extension Array {
-    // returns the first index where predicate is false
     func partitioningIndex(_ predicate: (Element) -> Bool) -> Int {
         var low = 0
         var high = count
@@ -29,53 +28,80 @@ private extension Array {
 }
 
 public class SplineInterpolator {
+    public typealias SplineSegment = (a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)
+    
     private struct SplineData {
-        let timestamp:CMTime
-        let spline:[(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)]
+        let id: Int
+        let timestamp: CMTime
+        let spline: [SplineSegment]
+        let points: [CGPoint]
     }
     
-    private var interpolationDuration:TimeInterval
-    private var sortedSplineData:[SplineData] = []
+    private var interpolationDuration: TimeInterval
+    private var sortedSplineData: [SplineData] = []
+    private var lastAddedID: Int?
     
     public init(interpolationDuration: TimeInterval = 0.1) {
         self.interpolationDuration = interpolationDuration
     }
     
-    public func addSpline(timestamp:CMTime, spline:[(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)]) {
-        let spline = Array(spline)
+    public func addSpline(
+        id: Int,
+        timestamp: CMTime,
+        spline: [SplineSegment],
+        points: [CGPoint]
+    ) {
+        if lastAddedID == id {
+            return
+        }
         
         guard sortedSplineData.isEmpty || sortedSplineData.first!.spline.count == spline.count else {
             fatalError("all added splines must have the same number of segments, current: \(sortedSplineData.first!.spline.count), added: \(spline.count)")
         }
         
-        // find first index where existing timestamp is >= new timestamp
-        let insertionIndex = sortedSplineData.partitioningIndex { $0.timestamp < timestamp }
+        lastAddedID = id
         
-        // if equal timestamp exists at that position, overwrite; otherwise insert
+        let insertionIndex = sortedSplineData.partitioningIndex { $0.timestamp < timestamp }
+        let data = SplineData(id: id, timestamp: timestamp, spline: spline, points: points)
+        
         if insertionIndex < sortedSplineData.count && sortedSplineData[insertionIndex].timestamp == timestamp {
-            sortedSplineData[insertionIndex] = SplineData(timestamp: timestamp, spline: spline)
+            sortedSplineData[insertionIndex] = data
         } else {
-            sortedSplineData.insert(SplineData(timestamp: timestamp, spline: spline), at: insertionIndex)
+            sortedSplineData.insert(data, at: insertionIndex)
         }
     }
     
     public func removeAll() {
         sortedSplineData.removeAll()
+        lastAddedID = nil
     }
     
-    public func interpolatedSpline(timestamp: CMTime, removeOlder: Bool = false) -> [(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)] {
-        guard !sortedSplineData.isEmpty else { return [] }
-        if sortedSplineData.count == 1 { return sortedSplineData[0].spline }
+    public func interpolatedSpline(
+        timestamp: CMTime,
+        removeOlder: Bool = false
+    ) -> (spline: [SplineSegment], points: [CGPoint]) {
+        guard !sortedSplineData.isEmpty else { return ([], []) }
+        
+        if sortedSplineData.count == 1 {
+            let data = sortedSplineData[0]
+            return (data.spline, data.points)
+        }
         
         @inline(__always)
-        func lerp(_ p0: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint { p0 + (p1 - p0) * t }
+        func lerp(_ v0: CGFloat, _ v1: CGFloat, _ t: CGFloat) -> CGFloat {
+            v0 + (v1 - v0) * t
+        }
         
         @inline(__always)
+        func lerp(_ p0: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
+            p0 + (p1 - p0) * t
+        }
+        
         func lerpSpline(
-            _ s0: [(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)],
-            _ s1: [(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)],
+            _ s0: [SplineSegment],
+            _ s1: [SplineSegment],
             _ t: CGFloat
-        ) -> [(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)] {
+        ) -> [SplineSegment] {
             zip(s0, s1).map { seg0, seg1 in
                 (
                     a: lerp(seg0.a, seg1.a, t),
@@ -86,40 +112,117 @@ public class SplineInterpolator {
             }
         }
         
-        // find the newest spline with timestamp <= now (ignore future splines)
-        let firstGreaterIndex = sortedSplineData.partitioningIndex { $0.timestamp <= timestamp }
-        let k = max(0, min(sortedSplineData.count - 1, firstGreaterIndex - 1))
+        func resampledPoints(_ points: [CGPoint], count: Int) -> [CGPoint] {
+            guard count > 0 else { return [] }
+            guard !points.isEmpty else { return [] }
+            guard points.count > 1 else { return Array(repeating: points[0], count: count) }
+            guard count > 1 else { return [points[0]] }
+            
+            var result: [CGPoint] = []
+            result.reserveCapacity(count)
+            
+            let sourceMaxIndex = CGFloat(points.count - 1)
+            let targetMaxIndex = CGFloat(count - 1)
+            
+            for i in 0 ..< count {
+                let sourcePosition = CGFloat(i) / targetMaxIndex * sourceMaxIndex
+                let index0 = Int(floor(sourcePosition))
+                let index1 = min(index0 + 1, points.count - 1)
+                let t = sourcePosition - CGFloat(index0)
+                
+                result.append(lerp(points[index0], points[index1], t))
+            }
+            
+            return result
+        }
         
-        func interpolated(at time: CMTime, upTo index: Int) -> [(a: CGPoint, b: CGPoint, c: CGPoint, d: CGPoint)] {
-            if index <= 0 { return sortedSplineData[0].spline }
+        func lerpPoints(_ p0: [CGPoint], _ p1: [CGPoint], _ t: CGFloat) -> [CGPoint] {
+            let count0 = p0.count
+            let count1 = p1.count
+            
+            guard count0 > 0 || count1 > 0 else { return [] }
+            guard count0 > 0 else { return p1 }
+            guard count1 > 0 else { return p0 }
+            
+            let interpolatedCount = max(
+                1,
+                Int(round(lerp(CGFloat(count0), CGFloat(count1), t)))
+            )
+            
+            let r0 = resampledPoints(p0, count: interpolatedCount)
+            let r1 = resampledPoints(p1, count: interpolatedCount)
+            
+            return zip(r0, r1).map { lerp($0, $1, t) }
+        }
+        
+        func interpolated(
+            at time: CMTime,
+            upTo index: Int
+        ) -> (spline: [SplineSegment], points: [CGPoint]) {
+            if index <= 0 {
+                let data = sortedSplineData[0]
+                return (data.spline, data.points)
+            }
             
             let to = sortedSplineData[index]
             let dt = (time - to.timestamp).seconds
             
             if dt >= interpolationDuration {
-                return to.spline
+                return (to.spline, to.points)
             }
             
             let from = interpolated(at: to.timestamp, upTo: index - 1)
             let t = CGFloat(max(0.0, min(1.0, dt / interpolationDuration)))
             
-            return lerpSpline(from, to.spline, t)
+            return (
+                spline: lerpSpline(from.spline, to.spline, t),
+                points: lerpPoints(from.points, to.points, t)
+            )
         }
         
+        let firstGreaterIndex = sortedSplineData.partitioningIndex { $0.timestamp <= timestamp }
+        let k = max(0, min(sortedSplineData.count - 1, firstGreaterIndex - 1))
+        
         if firstGreaterIndex == 0 && sortedSplineData[0].timestamp > timestamp {
-            return sortedSplineData[0].spline
+            let data = sortedSplineData[0]
+            return (data.spline, data.points)
         }
         
         let result = interpolated(at: timestamp, upTo: k)
-        
+
         if removeOlder {
+            let lastIndex = sortedSplineData.count - 1
+            let last = sortedSplineData[lastIndex]
+
+            if k == lastIndex && (timestamp - last.timestamp).seconds >= interpolationDuration {
+                sortedSplineData.removeAll()
+                sortedSplineData.append(last)
+                return result
+            }
+
             let timescale = timestamp.timescale == 0 ? CMTimeScale(600) : timestamp.timescale
             let cutoffTime = timestamp - CMTime(seconds: interpolationDuration, preferredTimescale: timescale)
-            
-            let pruneCount = sortedSplineData.partitioningIndex { $0.timestamp < cutoffTime }
-            if pruneCount > 0 { sortedSplineData.removeFirst(pruneCount) }
+
+            let firstKeepIndex = sortedSplineData.partitioningIndex { $0.timestamp < cutoffTime }
+
+            if firstKeepIndex > 0 {
+                let collapseIndex = min(firstKeepIndex, sortedSplineData.count - 1)
+                let collapsed = interpolated(at: cutoffTime, upTo: collapseIndex)
+                let collapsedID = sortedSplineData[collapseIndex].id
+
+                sortedSplineData.removeFirst(firstKeepIndex)
+                sortedSplineData.insert(
+                    SplineData(
+                        id: collapsedID,
+                        timestamp: cutoffTime,
+                        spline: collapsed.spline,
+                        points: collapsed.points
+                    ),
+                    at: 0
+                )
+            }
         }
-        
-        return Array(result)
+
+        return result
     }
 }
