@@ -221,3 +221,10 @@ public extension Vector2D {
         return Self(x: Scalar(p.x), y: Scalar(p.y))
     }
 }
+
+
+public extension Vector2D {
+    static func lerp(_ a: Self, _ b: Self, _ t: Scalar) -> Self {
+        return a + (b - a) * t
+    }
+}
