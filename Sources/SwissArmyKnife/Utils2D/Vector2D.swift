@@ -115,6 +115,10 @@ public extension Vector2D {
         return (self - vector).magnitude
     }
     
+    func distanceSquared(to vector: Self) -> Scalar {
+        return (self - vector).magnitudeSquared
+    }
+    
     func distance(toSegment a: Self, b: Self) -> Scalar {
         let ab = Self(x: b.x - a.x, y: b.y - a.y)
         let ap = Self(x: self.x - a.x, y: self.y - a.y)
@@ -226,5 +230,9 @@ public extension Vector2D {
 public extension Vector2D {
     static func lerp(_ a: Self, _ b: Self, _ t: Scalar) -> Self {
         return a + (b - a) * t
+    }
+    
+    func lerp(_ p: Self, _ t: Scalar) -> Self {
+        return Self.lerp(self, p, t)
     }
 }
