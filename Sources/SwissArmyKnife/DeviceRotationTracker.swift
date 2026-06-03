@@ -154,6 +154,8 @@ public class VideoData: Codable {
 }
 
 public class DeviceRotationTracker {
+    public static let defaultTimeOffset = CMTime(seconds: 0.003, preferredTimescale: 10000)
+    
 #if os(iOS)
     private var motionManager:CMMotionManager? = nil
 #endif
