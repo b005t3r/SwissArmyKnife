@@ -90,7 +90,7 @@ public final class VideoReader {
             throw VideoReaderError.noVideoTrack
         }
         
-        self.sourceResolution = videoTrack.naturalSize   // ✅ raw track dimensions
+        self.sourceResolution = videoTrack.naturalSize   // raw track dimensions
         
         let t = videoTrack.preferredTransform
         let angle = atan2(t.b, t.a)
