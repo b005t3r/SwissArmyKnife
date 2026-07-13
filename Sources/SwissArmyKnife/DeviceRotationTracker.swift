@@ -170,9 +170,9 @@ public class DeviceRotationTracker {
     }
     
     deinit {
-        #if os(iOS)
+#if os(iOS)
         stopTracking()
-        #endif
+#endif
     }
     
 #if os(iOS)
@@ -192,9 +192,9 @@ public class DeviceRotationTracker {
                 attitude: motion.attitude.copy() as! CMAttitude,
                 timestamp: motion.timestamp)
             
-//            let now = CMClockGetTime(CMClockGetHostTimeClock())
-//
-//            print("delay: \((now.seconds - motion.timestamp) * 1000)ms")
+            //            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            //
+            //            print("delay: \((now.seconds - motion.timestamp) * 1000)ms")
             
             self.gyroDataQueue.sync {
                 self.gyroData.append(data)
@@ -211,7 +211,7 @@ public class DeviceRotationTracker {
         motionManager = nil
     }
 #endif
-
+    
     public func loadTrackingData(data:VideoData) {
         self.data = data
     }
@@ -221,7 +221,7 @@ public class DeviceRotationTracker {
             self.gyroData.removeAll()
         }
     }
-
+    
     public func getCachedData() -> [(q: simd_quatf, t: TimeInterval)] {
         self.gyroDataQueue.sync {
             return self.gyroData.map { (data) -> (q: simd_quatf, t: TimeInterval) in
@@ -283,12 +283,22 @@ public class DeviceRotationTracker {
     }
     
     private func findClosestFrame(seconds:TimeInterval) -> simd_quatf {
-        guard hasRotation(seconds: seconds) else { return .init(real: 1.0, imag: .zero) }
-
         if let data {
+            guard !data.gyroTimestamps.isEmpty, !data.gyro.isEmpty else {
+                return .init(real: 1.0, imag: .zero)
+            }
+            
+            if seconds <= data.gyroTimestamps[0] {
+                return data.gyro[0]
+            }
+            
+            if seconds >= data.gyroTimestamps[data.gyroTimestamps.count - 1] {
+                return data.gyro[data.gyro.count - 1]
+            }
+            
             if let nextIndex = data.gyroTimestamps.firstIndex { t in t >= seconds } {
-                let prevIndex = max(0, nextIndex - 1)
-
+                let prevIndex = nextIndex - 1
+                
                 let prevTimestamp = data.gyroTimestamps[prevIndex]
                 let nextTimestamp = data.gyroTimestamps[nextIndex]
                 let delta = nextTimestamp - prevTimestamp
@@ -300,13 +310,31 @@ public class DeviceRotationTracker {
                 return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
             }
             else {
-                fatalError("no gyroData, but hasRotation() returned true")
+                return data.gyro.last ?? .init(real: 1.0, imag: .zero)
             }
         }
         else {
             return gyroDataQueue.sync {
+                guard !self.gyroData.isEmpty else {
+                    print("gyro buffer empty")
+                    
+                    return .init(real: 1.0, imag: .zero)
+                }
+                
+                if seconds <= self.gyroData[0].timestamp {
+                    print("gyro data in the past")
+
+                    return self.gyroData[0].simfQuaternion
+                }
+                
+                if seconds >= self.gyroData[self.gyroData.count - 1].timestamp {
+                    print("gyro data in the future")
+
+                    return self.gyroData[self.gyroData.count - 1].simfQuaternion
+                }
+                
                 if let nextIndex = self.gyroData.firstIndex { d in d.timestamp >= seconds } {
-                    let prevIndex = max(0, nextIndex - 1)
+                    let prevIndex = nextIndex - 1
                     
                     let prevTimestamp = self.gyroData[prevIndex].timestamp
                     let nextTimestamp = self.gyroData[nextIndex].timestamp
@@ -314,17 +342,13 @@ public class DeviceRotationTracker {
                     let alpha = delta > 0 ? seconds - prevTimestamp : 0
                     
                     let prev = self.gyroData[prevIndex].simfQuaternion
-                    let next = self.gyroData[prevIndex].simfQuaternion
+                    let next = self.gyroData[nextIndex].simfQuaternion
                     
                     return alpha == 0 || delta == 0 ? prev : simd_slerp(prev, next, Float(alpha / delta))
                 }
                 else {
-                    fatalError("no gyroData, but hasRotation() returned true")
+                    return self.gyroData.last?.simfQuaternion ?? .init(real: 1.0, imag: .zero)
                 }
-                
-                return !self.gyroData.isEmpty
-                    ? self.gyroData.min { left, right in abs(left.timestamp - seconds) < abs(right.timestamp - seconds) }?.simfQuaternion ?? .init(real: 1.0, imag: .zero)
-                    : .init(real: 1.0, imag: .zero)
             }
         }
     }
