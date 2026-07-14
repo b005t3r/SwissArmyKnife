@@ -134,21 +134,46 @@ public final class Zoom {
         let changes = self.changes
         lock.unlock()
 
-        guard changes.count > 2, duration > 0 else {
+        guard changes.count > 1 else {
             return changes
+        }
+        
+        let locationTolerance: CGFloat = 0.001
+        let levelTolerance: CGFloat = 0.001
+        
+        let filteredChanges = changes.reduce(into: [Change]()) { result, change in
+            guard let previous = result.last else {
+                result.append(change)
+                return
+            }
+            
+            let locationChanged =
+                abs(change.state.location.x - previous.state.location.x) > locationTolerance
+                || abs(change.state.location.y - previous.state.location.y) > locationTolerance
+            
+            let levelChanged =
+                abs(change.state.level - previous.state.level) > levelTolerance
+            
+            if locationChanged || levelChanged {
+                result.append(change)
+            }
+        }
+
+        guard filteredChanges.count > 2, duration > 0 else {
+            return filteredChanges
         }
 
         var result: [Change] = []
         var sequenceStart = 0
 
-        while sequenceStart < changes.count {
+        while sequenceStart < filteredChanges.count {
             var sequenceEnd = sequenceStart
 
-            while sequenceEnd + 1 < changes.count {
+            while sequenceEnd + 1 < filteredChanges.count {
                 let interval = CMTimeGetSeconds(
                     CMTimeSubtract(
-                        changes[sequenceEnd + 1].timestamp,
-                        changes[sequenceEnd].timestamp
+                        filteredChanges[sequenceEnd + 1].timestamp,
+                        filteredChanges[sequenceEnd].timestamp
                     )
                 )
 
@@ -159,10 +184,10 @@ public final class Zoom {
                 sequenceEnd += 1
             }
 
-            result.append(changes[sequenceStart])
+            result.append(filteredChanges[sequenceStart])
 
             if sequenceEnd > sequenceStart {
-                result.append(changes[sequenceEnd])
+                result.append(filteredChanges[sequenceEnd])
             }
 
             sequenceStart = sequenceEnd + 1
@@ -170,7 +195,7 @@ public final class Zoom {
 
         return result
     }
-
+    
     private static func sortedTimeline(_ timeline: [Change]) -> [Change] {
         let sorted = timeline.sorted {
             CMTimeCompare($0.timestamp, $1.timestamp) < 0
