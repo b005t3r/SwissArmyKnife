@@ -20,7 +20,7 @@ public final class Zoom {
         }
     }
 
-    public struct Change: Equatable {
+    public struct Change: Equatable, CustomStringConvertible, CustomDebugStringConvertible {
         public let timestamp: CMTime
         public let state: State
 
@@ -33,8 +33,22 @@ public final class Zoom {
             self.timestamp = timestamp
             self.state = state
         }
-    }
+        
+        public var description: String {
+            String(
+                format: "%.3f[%.2f,%.2f]x%.2f",
+                timestamp.seconds,
+                state.location.x,
+                state.location.y,
+                state.level
+            )
+        }
 
+        public var debugDescription: String {
+            description
+        }
+    }
+    
     private let lock = NSLock()
     private var changes: [Change]
 
