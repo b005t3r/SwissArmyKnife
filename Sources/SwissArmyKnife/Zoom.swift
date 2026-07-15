@@ -141,22 +141,33 @@ public final class Zoom {
         let locationTolerance: CGFloat = 0.001
         let levelTolerance: CGFloat = 0.001
         
-        let filteredChanges = changes.reduce(into: [Change]()) { result, change in
-            guard let previous = result.last else {
-                result.append(change)
-                return
+        func statesAreEqual(_ lhs: State, _ rhs: State) -> Bool {
+            abs(lhs.location.x - rhs.location.x) <= locationTolerance
+                && abs(lhs.location.y - rhs.location.y) <= locationTolerance
+                && abs(lhs.level - rhs.level) <= levelTolerance
+        }
+        
+        var filteredChanges: [Change] = []
+        var sequenceStart = 0
+        
+        while sequenceStart < changes.count {
+            var sequenceEnd = sequenceStart
+            
+            while sequenceEnd + 1 < changes.count,
+                  statesAreEqual(
+                    changes[sequenceStart].state,
+                    changes[sequenceEnd + 1].state
+                  ) {
+                sequenceEnd += 1
             }
             
-            let locationChanged =
-                abs(change.state.location.x - previous.state.location.x) > locationTolerance
-                || abs(change.state.location.y - previous.state.location.y) > locationTolerance
+            filteredChanges.append(changes[sequenceStart])
             
-            let levelChanged =
-                abs(change.state.level - previous.state.level) > levelTolerance
-            
-            if locationChanged || levelChanged {
-                result.append(change)
+            if sequenceEnd > sequenceStart {
+                filteredChanges.append(changes[sequenceEnd])
             }
+            
+            sequenceStart = sequenceEnd + 1
         }
 
         guard filteredChanges.count > 2, duration > 0 else {
@@ -164,7 +175,7 @@ public final class Zoom {
         }
 
         var result: [Change] = []
-        var sequenceStart = 0
+        sequenceStart = 0
 
         while sequenceStart < filteredChanges.count {
             var sequenceEnd = sequenceStart
