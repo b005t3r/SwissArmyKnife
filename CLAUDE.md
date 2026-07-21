@@ -14,6 +14,11 @@ Never perform an automated build for this project, the user will do that.
 Never perform an automated test run for this project, the user will do that.
 Never commit anything to the git repository, the user will handle that.
 
+## Working style
+
+- Keep replies to the user short, concise and to the point. The user does not want to read essays.
+- Code comments should be minimal, start sentences with a lowercase letter, and avoid fancy symbols (no emojis, em dashes, ellipses).
+
 ## Architecture
 
 Everything lives in one flat module (no submodules); the only subfolder is `Utils2D/`. Code is organized as **free functions and extensions on Foundation/CoreVideo/CoreMedia types** rather than instance methods on custom types — a "toolkit" style consistent with the package name.
