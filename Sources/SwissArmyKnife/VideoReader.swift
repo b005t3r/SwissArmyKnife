@@ -179,7 +179,14 @@ public final class VideoReader {
     private func buildFrameIndexIfNeeded() throws {
         guard framePTS.isEmpty else { return }
         guard let videoTrack else { return }   // no video – nothing to do
-        
+
+        // scanning the whole track just to collect pts costs ~0.1ms per frame, so reuse the
+        // sidecar index when the video has not changed since it was written
+        if let cached = FrameIndexCache.load(for: url, duration: duration) {
+            framePTS = cached
+            return
+        }
+
         teardownCachedReader()
         
         let reader = try AVAssetReader(asset: asset)
@@ -217,8 +224,11 @@ public final class VideoReader {
         }
         
         reader.cancelReading()
-        
+
         framePTS = Array(Set(ptsArray)).sorted()
+
+        FrameIndexCache.save(framePTS, for: url)
+        FrameIndexCache.verify(framePTS, for: url)
     }
     
     private func copyVideoSample(at time: CMTime) throws -> CMSampleBuffer? {
