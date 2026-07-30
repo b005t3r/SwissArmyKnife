@@ -125,9 +125,10 @@ public final class VideoReader {
         
         let step = max(0, skippedFrameCount) + 1
         
-        // If not started yet, start at first valid frame (0)
-        let baseIndex = (currentFrameIndex < 0) ? 0 : currentFrameIndex
-        let nextIndex = clamp(baseIndex + step, minValue: 0, maxValue: framePTS.count - 1)
+        // the first call starts at frame 0, every later one advances by step
+        let nextIndex = (currentFrameIndex < 0)
+            ? 0
+            : clamp(currentFrameIndex + step, minValue: 0, maxValue: framePTS.count - 1)
         
         // Round down just in case we hit the end non-aligned (keeps invariant)
         let validNextIndex = (nextIndex / step) * step
