@@ -18,6 +18,7 @@ Never commit anything to the git repository, the user will handle that.
 
 - Keep replies to the user short, concise and to the point. The user does not want to read essays.
 - Code comments should be minimal, start sentences with a lowercase letter, and avoid fancy symbols (no emojis, em dashes, ellipses).
+- Do exactly what was asked, nothing more. Don't go exploring the codebase or making unrelated changes beyond the scope of the request. If something adjacent seems worth doing, ask first instead of just doing it.
 
 ## Architecture
 
