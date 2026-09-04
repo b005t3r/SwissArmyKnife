@@ -212,8 +212,23 @@ public class DeviceRotationTracker {
     }
 #endif
     
-    public func loadTrackingData(data:VideoData) {
-        self.data = data
+    public func loadTrackingData(data:VideoData, offset:CMTime = .zero) {
+        guard offset != .zero else {
+            self.data = data
+
+            return
+        }
+
+        let offsetSeconds = offset.seconds
+
+        self.data = VideoData(
+            videoTimestamps: data.videoTimestamps,
+            skippedTimestamps: data.skippedTimestamps,
+            gyro: data.gyro,
+            gyroTimestamps: data.gyroTimestamps.map { $0 + offsetSeconds },
+            horizontalFOV: data.horizontalFOV,
+            verticalFOV: data.verticalFOV,
+            shutterSpeed: data.shutterSpeed)
     }
     
     public func clearCachedData() {
