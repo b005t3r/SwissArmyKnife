@@ -156,6 +156,19 @@ public final class CameraControl {
         }
     }
     
+    public func setExposureCompensation(_ bias: Float) {
+        let device = camera.inputCamera!
+        let clamped = min(max(bias, device.minExposureTargetBias), device.maxExposureTargetBias)
+
+        do {
+            try device.lockForConfiguration()
+            device.setExposureTargetBias(clamped, completionHandler: nil)
+            device.unlockForConfiguration()
+        } catch {
+            print("Failed setting exposure compensation: \(error)")
+        }
+    }
+
     private func startAutoISOAdjustment() {
         stopAutoISOAdjustment()
         guard fixedShutter != .invalid else { return }
