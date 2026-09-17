@@ -24,9 +24,11 @@ private func FourCharCodeToString(_ value: FourCharCode) -> String {
 public enum CameraMode: String {
     case res1080p30fps = "FullHD@30"
     case res1080p60fps = "FullHD@60"
+    case res1080p120fps = "FullHD@120"
     case res1080p240fps = "FullHD@240"
     case res4k30fps = "4K@30"
     case res4k60fps = "4K@60"
+    case res720p120fps = "HD@120"
     case res720p240fps = "HD@240"
 
     public var fps: Double {
@@ -35,6 +37,8 @@ public enum CameraMode: String {
             30
         case .res1080p60fps, .res4k60fps:
             60
+        case .res720p120fps, .res1080p120fps:
+            120
         case .res1080p240fps, .res720p240fps:
             240
         }
@@ -46,11 +50,11 @@ public enum CameraMode: String {
 
     public var resolution: CGSize {
         switch self {
-        case .res1080p30fps, .res1080p60fps, .res1080p240fps:
+        case .res1080p30fps, .res1080p60fps, .res1080p240fps, .res1080p120fps:
             CGSize(width: 1920, height: 1080)
         case .res4k30fps, .res4k60fps:
             CGSize(width: 3840, height: 2160)
-        case .res720p240fps:
+        case .res720p240fps, .res720p120fps:
             CGSize(width: 1280, height: 720)
         }
     }
@@ -94,7 +98,7 @@ public final class CameraControl {
             let is4k = dimensions.width == 3840 && dimensions.height == 2160
             let is420f = pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             //let is420v = pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-            let is30or60or240 = maxFPS == 30 || maxFPS == 60 || maxFPS == 240
+            let isSupportedFPS = maxFPS == 30 || maxFPS == 60 || maxFPS == 120 || maxFPS == 240
             let isHdrSupported = format.isVideoHDRSupported
 
             print("-----")
@@ -116,8 +120,8 @@ public final class CameraControl {
             }
 
             // hdr supported means just better quality, only one 60fps 1080p format doesn't support that
-            // 240fps slow motion formats generally don't support HDR at all, so don't require it for those
-            guard (is720p || is1080p || is4k) && is420f && is30or60or240 && (isHdrSupported || maxFPS == 240) else { continue }
+            // 120/240fps slow motion formats generally don't support HDR at all, so don't require it for those
+            guard (is720p || is1080p || is4k) && is420f && isSupportedFPS && (isHdrSupported || maxFPS == 240 || maxFPS == 120) else { continue }
 
             if (dimensions.width != 1280 || dimensions.height != 720)
                 && (dimensions.width != 1920 || dimensions.height != 1080)
@@ -126,12 +130,21 @@ public final class CameraControl {
             }
 
             if dimensions.width == 1280 && dimensions.height == 720 {
-                formatMap[.res720p240fps] = format
+                switch maxFPS {
+                case 240:
+                    formatMap[.res720p240fps] = format
+                case 120:
+                    formatMap[.res720p120fps] = format
+                default:
+                    break
+                }
             }
             else if dimensions.width == 1920 || dimensions.height == 1080 {
                 switch maxFPS {
                 case 240:
                     formatMap[.res1080p240fps] = format
+                case 120:
+                    formatMap[.res1080p120fps] = format
                 case 60:
                     formatMap[.res1080p60fps] = format
                 default:
