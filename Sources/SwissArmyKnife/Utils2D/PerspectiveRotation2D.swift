@@ -9,7 +9,7 @@ import simd
 import Foundation
 
 @inline(__always)
-func rotateVector(_ v: simd_float3, by q: simd_quatf) -> simd_float3 {
+public func rotateVector(_ v: simd_float3, by q: simd_quatf) -> simd_float3 {
     // simd_quatf stores the quaternion as (imag.xyz, real)
     let qv = q.imag               // simd_float3
     let qw = q.real               // scalar
@@ -20,7 +20,7 @@ func rotateVector(_ v: simd_float3, by q: simd_quatf) -> simd_float3 {
 }
 
 @inline(__always)
-func makeCameraRay(pixel: simd_float2,
+public func makeCameraRay(pixel: simd_float2,
                     frameSize: simd_float2,
                     verticalFOV: Float) -> simd_float3 {
 
