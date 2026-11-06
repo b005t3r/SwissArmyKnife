@@ -68,7 +68,7 @@ public class VideoRecorder {
         }
     }
     
-    public init(URL: Foundation.URL, size: CGSize, fileType: AVFileType = AVFileType.mov, sourcePixelFormat:OSType? = nil, liveVideo: Bool = false, enableAudio:Bool = false, settings: [String: AnyObject]? = nil
+    public init(URL: Foundation.URL, size: CGSize, fileType: AVFileType = AVFileType.mov, sourcePixelFormat:OSType? = nil, liveVideo: Bool = false, enableAudio:Bool = false, bitrate: Int? = nil, settings: [String: AnyObject]? = nil
     ) throws {
         self.size = size
         assetWriter = try AVAssetWriter(url: URL, fileType: fileType)
@@ -83,7 +83,7 @@ public class VideoRecorder {
         }
         
         var compression = [String: Any]()
-        compression[AVVideoAverageBitRateKey] = VideoRecorder.heuristicBitrate(size: size, fps: 60.0) / 2 // target 60 fps, since we don't have the actual value here
+        compression[AVVideoAverageBitRateKey] = bitrate ?? (VideoRecorder.heuristicBitrate(size: size, fps: 60.0) / 2) // target 60 fps, since we don't have the actual value here
         
         localSettings[AVVideoCompressionPropertiesKey] = compression as AnyObject
         localSettings[AVVideoWidthKey] =

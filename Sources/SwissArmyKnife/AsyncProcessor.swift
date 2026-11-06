@@ -38,20 +38,28 @@ public final class AsyncProcessor<T> {
 
         workQueue.async { [weak self] in
             while true {
-                guard let self else { return }
-                
-                let runningBefore = self.dataQueue.sync { self.isRunning }
-                guard runningBefore else { break }
+                // one pool per iteration: this work item never returns, so libdispatch
+                // never drains the pool it started with, and anything the worker
+                // autoreleases would accumulate for the process's lifetime.
+                let keepRunning = autoreleasepool { () -> Bool in
+                    guard let self else { return false }
 
-                self.semaphore.wait()
+                    let runningBefore = self.dataQueue.sync { self.isRunning }
+                    guard runningBefore else { return false }
 
-                let runningAfter = self.dataQueue.sync { self.isRunning }
-                guard runningAfter else { break }
+                    self.semaphore.wait()
 
-                let dataToProcess: T? = self.dataQueue.sync { !self.data.isEmpty ? self.data.removeFirst() : nil }
+                    let runningAfter = self.dataQueue.sync { self.isRunning }
+                    guard runningAfter else { return false }
 
-                guard let dataToProcess else { continue }
-                worker(dataToProcess)
+                    let dataToProcess: T? = self.dataQueue.sync { !self.data.isEmpty ? self.data.removeFirst() : nil }
+
+                    guard let dataToProcess else { return true }
+                    worker(dataToProcess)
+                    return true
+                }
+
+                guard keepRunning else { break }
             }
         }
     }
