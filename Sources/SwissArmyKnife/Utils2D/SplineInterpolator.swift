@@ -55,10 +55,11 @@ public class SplineInterpolator {
             return
         }
         
-        guard sortedSplineData.isEmpty || sortedSplineData.first!.spline.count == spline.count else {
-            fatalError("all added splines must have the same number of segments, current: \(sortedSplineData.first!.spline.count), added: \(spline.count)")
+        // splines with a different segment count can't be blended, start over instead
+        if let first = sortedSplineData.first, first.spline.count != spline.count {
+            sortedSplineData.removeAll()
         }
-        
+
         lastAddedID = id
         
         let insertionIndex = sortedSplineData.partitioningIndex { $0.timestamp < timestamp }
@@ -92,9 +93,12 @@ public class SplineInterpolator {
             v0 + (v1 - v0) * t
         }
         
+        // invalid (nan) points can't be blended, the newer point wins so nan never propagates
         @inline(__always)
         func lerp(_ p0: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
-            p0 + (p1 - p0) * t
+            guard p0.isValid && p1.isValid else { return p1 }
+
+            return p0 + (p1 - p0) * t
         }
         
         func lerpSpline(
